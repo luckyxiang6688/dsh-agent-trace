@@ -1,5 +1,6 @@
 node_modules/
-tmp/
 *.log
+*.tgz
 .DS_Store
+# 工具态（npm 打包也按这份忽略；避免把 .omc 状态打进包）
 .omc/

@@ -203,7 +203,7 @@ npm test                          # node --test tests/*.test.ts
 node node_modules/tsdown/dist/run.mjs   # 构建
 ```
 
-- 单测当前 **266/266**（见 `npm test` 的 `ℹ pass` 汇总行）。
+- 单测当前 **269/269**（见 `npm test` 的 `ℹ pass` 汇总行）。
 - E2E：`node tests/e2e/align.mjs "<带 token 的实例 URL>"`，对运行中的实例逐元素点开校验（最近一次真视口 **82/82**，1440 宽与 `E2E_WIDTH=1280` 各跑一遍）；另有一个不依赖真实数据的隔离页 `tests/e2e/harness.mjs`（500 节点、错误兜底、抽屉标签）。
 - 归因覆盖率：`npm run coverage -- <stateDir>`（`stateDir` 是放着 `orchestrator.sqlite` 的目录）。离线只读统计「每条决定上的码，界面能不能翻译」，输出总覆盖率、未接单覆盖率与缺口明细；加 `--json` 出机器可读报告。
 - 客户端产物**必须是 DSH 的模块封装**（`window.__ModuleLoader__.load`）；输出普通 ESM 会让整个 Web UI 启动失败。
