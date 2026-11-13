@@ -102,7 +102,7 @@ test('两条读取路径都按指针选决定：倒序数组下列表与抽屉�
     threads: [],
     tickets: [],
   })!
-  assert.equal(detail.facts.find(fact => fact.label === '裁定')?.value, 'ignore（拒绝）')
+  assert.equal(detail.facts.find(fact => fact.label === '裁定')?.value, '拒绝（ignore）')
 })
 
 test('三源合并：库、配置、注册表取并集，装未用的来源也列出来', () => {

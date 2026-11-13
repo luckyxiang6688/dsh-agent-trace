@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { registerRoutes, type RequestLike, type ResponseLike, type WebServerLike } from '../src/service/routes.ts'
+import { registerRoutes, type RequestLike, type ResponseLike, type RuntimeStatus, type WebServerLike } from '../src/service/routes.ts'
 import { createHealth, type HealthTracker } from '../src/service/health.ts'
 import type { ChainReader } from '../src/domain/model.ts'
 
@@ -11,14 +11,15 @@ interface Captured {
 }
 
 /** 把路由注册下来，手动喂一个请求；不启真实端口。 */
-function harness(reader: Partial<ChainReader>, translate: (texts: readonly string[]) => Promise<(string | undefined)[]>
-  = async texts => texts.map(() => undefined), health?: HealthTracker) {
+function harness(reader: Partial<ChainReader> | undefined, translate: (texts: readonly string[]) => Promise<(string | undefined)[]>
+  = async texts => texts.map(() => undefined), health?: HealthTracker,
+  status: RuntimeStatus = { configured: true, stateDirOrigin: 'config' }) {
   let handler: ((req: RequestLike, res: ResponseLike) => unknown) | undefined
   const web: WebServerLike = {
     port: 3082,
     register(route) { handler = route.handler },
   }
-  registerRoutes(web, reader as ChainReader, translate, health ?? createHealth())
+  registerRoutes(web, reader as ChainReader | undefined, translate, health ?? createHealth(), status)
   return async (method: string, url: string, body?: string): Promise<Captured> => {
     const response: Captured = { status: 0, headers: {}, body: undefined }
     const listeners: Record<string, ((chunk?: unknown) => void)[]> = {}
@@ -255,4 +256,30 @@ test('路径里的坏百分号编码回 400：这是请求的问题，不是插�
   })
   const response = await request('GET', '/agent-trace/sources/%E0%A4%A/events')
   assert.equal(response.status, 400)
+})
+
+test('未配置存储时仍是「可解释的 503」，不是光秃秃的 404', async () => {
+  const request = harness(undefined, undefined, undefined, {
+    configured: false, stateDirOrigin: 'none', hint: '没有找到 superagent 的 stateDir。',
+  })
+  // 这两个接口在任何状态下都要能答：用户靠它们确认插件到底有没有在工作。
+  const status = await request('GET', '/agent-trace/status')
+  assert.equal(status.status, 200)
+  assert.deepEqual(status.body, { configured: false, stateDirOrigin: 'none', hint: '没有找到 superagent 的 stateDir。' })
+  assert.equal((await request('GET', '/agent-trace/health')).status, 200)
+
+  // 其余路由统一 503 + `unconfigured`：客户端据此画空状态，而不是逐条报「读取失败」。
+  for (const path of ['/agent-trace/sources', '/agent-trace/chains', '/agent-trace/sources/github/events']) {
+    const response = await request('GET', path)
+    assert.equal(response.status, 503, `${path} 应该 503`)
+    assert.equal((response.body as { unconfigured?: boolean }).unconfigured, true, `${path} 应带 unconfigured`)
+  }
+})
+
+test('配置成功时 /status 不携带 hint', async () => {
+  const request = harness({ listSources: async () => [] }, undefined, undefined,
+    { configured: true, stateDirOrigin: 'orchestrator' })
+  const status = await request('GET', '/agent-trace/status')
+  assert.equal(status.status, 200)
+  assert.deepEqual(status.body, { configured: true, stateDirOrigin: 'orchestrator' })
 })

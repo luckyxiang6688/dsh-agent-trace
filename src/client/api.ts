@@ -19,6 +19,17 @@ async function getJson<T>(path: string): Promise<T | undefined> {
   }
 }
 
+/** 插件当前的运行前提。未配置时它是页面唯一能说出原因的地方。 */
+export interface RuntimeStatus {
+  configured: boolean
+  stateDirOrigin: 'config' | 'orchestrator' | 'none'
+  hint?: string
+}
+
+export async function fetchStatus(): Promise<RuntimeStatus | undefined> {
+  return getJson<RuntimeStatus>('/status')
+}
+
 export async function fetchSources(): Promise<readonly SourceSummary[] | undefined> {
   const data = await getJson<{ items?: SourceSummary[] }>('/sources')
   return Array.isArray(data?.items) ? data.items : undefined

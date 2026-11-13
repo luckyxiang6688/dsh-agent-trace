@@ -1,4 +1,4 @@
-# dsh-agent-trace
+# dsh-superagent-trace
 
 **把 Super-agent 处理一条消息的全过程，展开成一张读得懂的时序图。**
 
@@ -38,35 +38,47 @@ DSH（DeepSeek Harness）的 `superagent` 配置会自己收消息、丢消息�
 
 - DeepSeek Harness `>= 0.2.1-rc.0 < 0.3.0`，并已有一个可用的 `superagent` profile
 - Node.js `22.19+` 或 `24+`
-- 该 profile 已配置 `dsh-superagent`，且知道它的 `stateDir`（`orchestrator.sqlite` 所在目录）
+- 该 profile 已配置 `dsh-superagent`（插件会自己从它那里找到 `orchestrator.sqlite`，不需要你填路径）
 
-### 1. 构建
+### 1. 装进 profile
+
+```sh
+dsh plugin --profile superagent add dsh-superagent-trace
+```
+
+重启 profile → 侧边栏点 **来源与工单**。
+
+### 2. 从源码安装（开发 / 调试用）
 
 ```sh
 cd plugin
-pnpm install        # 或 npm install
+npm install         # 或 pnpm install
 npm run build       # 产出 lib/index.js（宿主侧）与 lib/client.js（客户端模块）
 npm test            # 可选：单测
-```
-
-> 开发态可只装运行时依赖；构建需要 `tsdown` 与 `typescript`，已在 `devDependencies` 里声明。
-
-### 2. 装进 profile
-
-```sh
 dsh plugin --profile superagent add "link:$PWD/plugin"
 ```
 
+> 开发态可只装运行时依赖；构建需要 `tsdown` 与 `typescript`，已在 `devDependencies` 里声明。
+>
+> 如果你之前用手工 `insert` 装过，那条**可以留着**：同一个 id 只会挂载一次
+> （2026-11-13 实测，bundle 与 profile 各写一条，日志里仍只有一个实例），
+> profile 里的 `config` 会覆盖 bundle 的默认值。
+>
+> 例外：装过**改名前的 `dsh-agent-trace`** 的，旧条目要删掉——id 不同就是两个插件，
+> 会出现两个面板。
+
 ### 3. 配置
 
-在 `~/.dsh/profiles/superagent/cordis.patch.yml` 里加一段：
+**通常不需要配置。** 插件会从 `orchestrator` 服务读 superagent 自己的 `stateDir`——`orchestrator.sqlite` 就在那里，所以只要 superagent 装在这个 profile 里就能工作。
+
+只有两种情况要显式写：superagent 的库不在它的 `stateDir` 下，或者你想让本插件读另一个库。在 profile 的 `cordis.patch.yml` 里加一段：
 
 ```yaml
 - insert:
-    - id: dsh-agent-trace
-      name: dsh-agent-trace
+    - id: dsh-superagent-trace
+      name: dsh-superagent-trace
       config:
-        # 必填：superagent 的 stateDir，插件只读这里的 orchestrator.sqlite
+        # 可选：只在自动继承不对时写
         stateDir: /absolute/path/to/superagent/state
         # 可选：把会话日志里的英文推理翻成中文；不配就直接显示原文
         translate:
@@ -74,11 +86,7 @@ dsh plugin --profile superagent add "link:$PWD/plugin"
           model: deepseek-flash
 ```
 
-`stateDir` 没配时插件会跳过自己（日志里记一条），不会影响宿主。
-
-### 4. 打开
-
-重启 profile → 侧边栏点 **来源与工单**。
+如果上游的形状变了、两处都取不到 `stateDir`，页面会说明原因，而不是显示「空数据」。
 
 ---
 
@@ -103,7 +111,7 @@ dsh plugin --profile superagent add "link:$PWD/plugin"
 
 | 段 | 内容 |
 |---|---|
-| 事实 | 库里真有的字段：时间、发送者、线程、去向行、裁定与原因码、设置了版本快照、原文预览 |
+| 事实 | 库里真有的字段：时间、发送者、线程、去向行、裁定与原因码、原文预览；裁定了的还按 `policyVersion` 回查当时的策略快照——当时名单、当时启用规则、发送者是否在名单内 |
 | 为什么这样去 / 解释 | 由原因码查表得到的人话，**明确标注是解释**，不是记录 |
 | 没记录的事实 | 上游确实没写下来的东西，逐条声明（例如「过滤只落原因码，没落当时的设置快照」） |
 | 原文 / 关联工单 | 长文只回 200 字预览 + 总字数，点「展开原文」才取全文 |
@@ -195,8 +203,9 @@ npm test                          # node --test tests/*.test.ts
 node node_modules/tsdown/dist/run.mjs   # 构建
 ```
 
-- 单测当前 **232/232**（见 `npm test` 的 `ℹ pass` 汇总行）。
-- E2E：`node tests/e2e/align.mjs "<带 token 的实例 URL>"`，对运行中的实例逐元素点开校验；另有一个不依赖真实数据的隔离页 `tests/e2e/harness.mjs`（500 节点、错误兜底、抽屉标签）。
+- 单测当前 **266/266**（见 `npm test` 的 `ℹ pass` 汇总行）。
+- E2E：`node tests/e2e/align.mjs "<带 token 的实例 URL>"`，对运行中的实例逐元素点开校验（最近一次真视口 **82/82**，1440 宽与 `E2E_WIDTH=1280` 各跑一遍）；另有一个不依赖真实数据的隔离页 `tests/e2e/harness.mjs`（500 节点、错误兜底、抽屉标签）。
+- 归因覆盖率：`npm run coverage -- <stateDir>`（`stateDir` 是放着 `orchestrator.sqlite` 的目录）。离线只读统计「每条决定上的码，界面能不能翻译」，输出总覆盖率、未接单覆盖率与缺口明细；加 `--json` 出机器可读报告。
 - 客户端产物**必须是 DSH 的模块封装**（`window.__ModuleLoader__.load`）；输出普通 ESM 会让整个 Web UI 启动失败。
 
 ```

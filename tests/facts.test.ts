@@ -9,6 +9,8 @@ import type { StoreLike } from '../src/adapter/superagent/db.ts'
 
 const view = (savedAt: string, senders: string[] = ['alice']): PolicyView => ({
   sendersOf: () => senders,
+  // 与上游同口径：忽略大小写。
+  allows: (_source: string, id: string) => senders.some(allowed => allowed.toLowerCase() === id.toLowerCase()),
   enabledRules: () => ['copy', 'visual'],
   savedAt,
   version: 'v2',
@@ -41,7 +43,7 @@ const decision = (extra: Partial<RawDecision> = {}): RawDecision => ({
 test('准入依据读 mandate.basis，并按 policyVersion 回查当时快照', () => {
   const rows = gateFacts(decision(), trigger, policy, 'ticket-1')
   const gate = rows.filter(row => row.group === 'gate')
-  assert.equal(gate.find(row => row.label === '准入依据')?.value, '名单内发送者点名')
+  assert.equal(gate.find(row => row.label === '准入依据')?.value, '点名且名单内（addressed）')
   assert.match(gate.find(row => row.label === '发送者')?.value ?? '', /在名单内/)
   assert.equal(gate.find(row => row.label === '策略版本')?.tone, 'ok')
 })
@@ -64,7 +66,7 @@ test('主控会话读不到时写「未记录」，不编造 id；批量事件�
 
 test('没有工单的决定（ignore）不冒充产出；路由决定用完整 id 并带 Ticket', () => {
   const rows = gateFacts({ id: 'd2', kind: 'ignore', strength: 'inferred', triggerIds: ['t1'] }, trigger, policy, 'ticket-1')
-  assert.equal(rows.find(row => row.label === '产出')?.value, '没有工单（ignore）')
+  assert.equal(rows.find(row => row.label === '产出')?.value, '没有工单：不接（ignore）')
   // accept 的产出认它自己造出来的那张工单，不跟着页面参数走
   const accepted = gateFacts(decision(), trigger, policy, 'another-ticket')
   assert.equal(accepted.find(row => row.label === '产出')?.value, '工单 Ticket ticket-1')
@@ -84,7 +86,7 @@ test('ignore 没有 mandate：只给结果与强度，不伪造准入表', () =>
     reason: [{ code: 'said', values: { text: '证据不足' } }],
     audit: { rule_assessments: [{ rule_id: 'copy', matched: false, reason: '没有具体错字' }] },
   }, trigger, policy, 'ticket-1')
-  assert.equal(rows.find(row => row.label === '准入结果')?.value, '未接单（ignore）')
+  assert.equal(rows.find(row => row.label === '准入结果')?.value, '未接单 · 不接（ignore）')
   assert.equal(rows.find(row => row.label === '准入依据'), undefined)
   assert.equal(rows.find(row => row.label === '决定')?.tone, 'warn')
   assert.equal(rows.find(row => row.label === '理由')?.value, '证据不足')
@@ -101,6 +103,30 @@ test('研判理由与证据归入 assessment 分组，不再落进资格 Gate', 
     assert.equal(rows.find(row => row.label === label)?.group, 'assessment', label)
   }
   assert.equal(rows.find(row => row.label === '研判')?.tone, 'warn')
+  // 内置规则 id 译成「中文（code）」；自定义 id 原样，不编中文。
+  assert.equal(rows.find(row => row.label === '研判')?.value, '文案修正（copy） 未命中')
+})
+
+test('名单判定用 actor id，不用显示名：basis.sender 是名字时不能误判为不在名单内', () => {
+  // 上游 `basis.sender` 是 `entry.name || entry.id`，可能是个显示名；
+  // 拿显示名去比 id 名单，会把上游放行的人说成「不在名单内」，和 accept 自相矛盾。
+  const rows = gateFacts(decision({
+    mandate: {
+      strength: 'explicit', policyVersion: 'v2',
+      basis: { via: 'addressed', sender: '张三（显示名）', addressed: 'mention' },
+    },
+  }), trigger, policy, 'ticket-1')   // trigger.actor.id = 'alice'，在名单里
+  const row = rows.find(item => item.label === '发送者')!
+  assert.equal(row.value, '张三（显示名） · 在名单内')
+  assert.equal(row.tone, 'ok')
+})
+
+test('名单字段读不出时不冒充「不在名单内」', () => {
+  const unreadable: PolicyView = { ...latest, sendersOf: () => undefined, allows: () => false }
+  const snapshot: PolicySnapshot = { ...unreadable, latest: () => unreadable, at: () => unreadable }
+  const row = gateFacts(decision(), trigger, snapshot, 'ticket-1').find(item => item.label === '发送者')!
+  assert.match(row.value, /名单不可得/)
+  assert.equal(row.tone, 'muted')
 })
 
 test('历史版本查不到时不冒充最新策略', () => {

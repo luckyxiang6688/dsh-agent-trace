@@ -90,7 +90,7 @@ test('已结束的工单即使还挂着 delivery 也显示已结束', () => {
     delivery: { at: '2026-01-01T00:03:00Z', error: 'session gone' },
   }), 'ticket-1')!
   assert.equal(chain.stageTag, 'ended')
-  assert.equal(chain.stage, '已结束 · completed')
+  assert.equal(chain.stage, '已结束 · 完成（completed）')
   assert.equal(chain.endedAt, '2026-01-01T00:09:00Z')
 })
 

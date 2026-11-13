@@ -34,7 +34,7 @@ test('列表与链路来自夹具，来源名就是数据里的 id', async () =>
   const items = await reader.listChains(10)
   assert.equal(items.length, 1)
   assert.equal(items[0]!.ticketId, fixture.ticketId)
-  assert.equal(items[0]!.state, '已结束 · completed')
+  assert.equal(items[0]!.state, '已结束 · 完成（completed）')
   assert.ok(items[0]!.summary?.startsWith('fixture'))
 
   const chain = (await reader.readChain(fixture.ticketId))!

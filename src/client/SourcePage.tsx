@@ -7,7 +7,8 @@
 import { createElement as h, useCallback, useEffect, useRef, useState } from 'react'
 import type { ChainSummary } from '../domain/model.ts'
 import type { EventFate, SourceEvent, SourceSummary } from '../domain/source.ts'
-import { fetchChains, fetchSourceEvent, fetchSourceEvents, fetchSources } from './api.ts'
+import { fetchChains, fetchSourceEvent, fetchSourceEvents, fetchSources, fetchStatus } from './api.ts'
+import type { RuntimeStatus } from './api.ts'
 import { ErrorBoundary } from './boundary.ts'
 import { EventDrawer } from './EventDrawer.tsx'
 import { pushEscape } from './escape.ts'
@@ -38,6 +39,7 @@ export function SourcePage(): ReturnType<typeof h> {
   const [collapsed, setCollapsed] = useState(false)
   const [ratio, setRatio] = useState<number>(() => readStoredRatio())
   const [error, setError] = useState<string | undefined>()
+  const [status, setStatus] = useState<RuntimeStatus | undefined>()
 
   // 请求各自编号：切来源/切事件时，晚到的旧响应直接丢掉。
   const listSeq = useRef(0)
@@ -46,6 +48,11 @@ export function SourcePage(): ReturnType<typeof h> {
 
   useEffect(() => {
     void (async () => {
+      // 先问「插件是不是在工作」：未配置时后面的请求全都会 503，
+      // 逐条失败只会拼出一句「读取失败」，说不清原因。
+      const nextStatus = await fetchStatus()
+      setStatus(nextStatus)
+      if (nextStatus && nextStatus.configured === false) return
       const nextSources = await fetchSources()
       setSources(nextSources)
       if (nextSources === undefined) setError('来源列表读取失败')
@@ -166,6 +173,17 @@ export function SourcePage(): ReturnType<typeof h> {
   }, [activeSource, cursor, loadingMore])
 
   const summary = sources?.find(item => item.source === activeSource)
+
+  // 未配置：整页只回答一个问题——为什么是空的、下一步做什么。
+  if (status?.configured === false) {
+    return h('div', { 'data-source-page': 'unconfigured', style: styles.unconfiguredPane },
+      h('div', { style: styles.unconfiguredCard },
+        h('div', { style: styles.crashedTitle }, '没有找到 superagent 的数据库'),
+        h('div', { style: styles.crashedHint }, status.hint ?? '插件没有拿到 stateDir，所以不会读任何数据。'),
+        h('div', { style: styles.empty }, `stateDir 来源：${
+          status.stateDirOrigin === 'config' ? '显式配置'
+            : status.stateDirOrigin === 'orchestrator' ? 'orchestrator' : '未取到'}`)))
+  }
 
   return h('div', {
     'data-source-page': '1',

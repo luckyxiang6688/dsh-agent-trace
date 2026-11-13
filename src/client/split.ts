@@ -4,7 +4,7 @@
  * 比例存的是「上区占左栏高度的百分比」，不是像素：换窗口大小、换机器都还对。
  * 存储里的坏值（NaN、越界、非数字）一律回落默认值，不抛——脏数据只影响一次布局。
  */
-export const SPLIT_KEY = 'dsh-agent-trace:rail-split:v1'
+export const SPLIT_KEY = 'dsh-superagent-trace:rail-split:v1'
 export const DEFAULT_RATIO = 0.55
 export const MIN_RATIO = 0.15
 export const MAX_RATIO = 0.85

@@ -1,0 +1,12 @@
+# dsh-superagent-trace bundle layer: mounts the trace explorer.
+#
+# 这里**不写 config**：bundle 内的 patch 会跟着包分发到每一台机器，
+# 不能携带本机的绝对路径。
+#
+# 插件改为从 `orchestrator` 服务读 superagent 自己的 `machine.stateDir`
+# （插件读的 `orchestrator.sqlite` 就住在那里），所以零配置即可工作。
+# 只有当 superagent 的数据库不在其 stateDir 下时，才需要在 profile 的
+# `cordis.patch.yml` 里给本插件显式加 `config.stateDir`。
+- insert:
+    - id: dsh-superagent-trace
+      name: dsh-superagent-trace

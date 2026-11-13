@@ -41,6 +41,17 @@ const evaluate = async expression => {
 
 await send('Page.enable')
 await send('Runtime.enable')
+// 窄屏回归：E2E_WIDTH 有值时按该视口跑整套断言（默认沿用窗口实际尺寸）。
+// 事件行里的「详情」与工单标签只在桌面宽度实测过，窄一档要能重跑。
+const viewportWidth = Number(process.env.E2E_WIDTH ?? 0)
+if (viewportWidth) {
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: viewportWidth,
+    height: Number(process.env.E2E_HEIGHT ?? 900),
+    deviceScaleFactor: 1,
+    mobile: false,
+  })
+}
 // 插件包每次构建都会换 rev，但 Chrome 可能仍然复用旧模块；禁用缓存才能测到刚构建的产物。
 await send('Network.enable')
 await send('Network.setCacheDisabled', { cacheDisabled: true })
@@ -142,7 +153,7 @@ if (beforeSplit.splitter) {
   const afterSplit = await evaluate(`(() => ({
     height: Math.round(document.querySelector('[data-rail-sources]')?.getBoundingClientRect().height ?? 0),
     ratio: Number(document.querySelector('[data-splitter]')?.getAttribute('aria-valuenow') ?? 0),
-    stored: localStorage.getItem('dsh-agent-trace:rail-split:v1'),
+    stored: localStorage.getItem('dsh-superagent-trace:rail-split:v1'),
   }))()`)
   check('拖动分隔条改变上区高度', Math.abs(afterSplit.height - beforeSplit.height) > 20,
     `${beforeSplit.height} → ${afterSplit.height}px（${beforeSplit.ratio}% → ${afterSplit.ratio}%）`)
@@ -654,6 +665,42 @@ check('第二个 Esc 退回来源页，源视图恢复可见',
 await new Promise(r => setTimeout(r, 600))
 const eventRows = await evaluate(`document.querySelectorAll('[data-event]').length`)
 check('来源页有事件行', eventRows > 0, `${eventRows} 行`)
+// 事件行可点开抽屉，但纯文字行看不出来：每行正文后必须带一个「详情」标签。
+// 只看「存在」挡不住零尺寸/隐藏，所以要求它真有非零盒子且可见。
+const eventRowDetails = await evaluate(`(() => {
+  const rows = [...document.querySelectorAll('[data-event]')]
+  const tagged = rows.filter(row => {
+    const c = row.querySelector('[data-event-detail]')
+    if (!c) return false
+    const r = c.getBoundingClientRect()
+    const s = getComputedStyle(c)
+    return r.width > 0 && r.height > 0 && s.visibility === 'visible' && s.display !== 'none'
+  })
+  return JSON.stringify({ rows: rows.length, tagged: tagged.length })
+})()`)
+const { rows: rowTotal, tagged: detailTotal } = JSON.parse(eventRowDetails)
+check('每个事件行都带「详情」入口', rowTotal > 0 && detailTotal === rowTotal, `${detailTotal}/${rowTotal}`)
+
+// 窄屏回归：标签必须留在卡片的可见范围内，且「详情」不能被工单标签压住。
+// 没有带工单标签的行时不能记通过——那会让这条断言变成空转。
+const chipFit = await evaluate(`(() => {
+  const rows = [...document.querySelectorAll('[data-event]')]
+  const withTickets = rows.filter(row => row.querySelector('[data-ticket-chip]'))
+  const problems = []
+  for (const row of withTickets) {
+    const box = row.getBoundingClientRect()
+    const detail = row.querySelector('[data-event-detail]').getBoundingClientRect()
+    const firstTicket = row.querySelector('[data-ticket-chip]').getBoundingClientRect()
+    if (detail.right > box.right + 1) problems.push('详情越出卡片右缘')
+    if (detail.bottom > box.bottom + 1) problems.push('详情越出卡片下缘')
+    if (detail.right > firstTicket.left + 1) problems.push('详情与工单标签重叠')
+  }
+  return JSON.stringify({ total: withTickets.length, problems: [...new Set(problems)] })
+})()`)
+const { total: chippedRows, problems: chipProblems } = JSON.parse(chipFit)
+check('带工单标签的事件行里，详情与工单标签不越界、不重叠',
+  chippedRows > 0 && chipProblems.length === 0,
+  chippedRows === 0 ? '没有带工单标签的事件行（断言无法覆盖）' : `${chippedRows} 行，${chipProblems.join('、') || '无问题'}`)
 
 const filteredRow = await evaluate(`(() => {
   const row = document.querySelector('[data-event][data-fate="filtered"]');
@@ -677,8 +724,11 @@ if (filteredRow) {
         .find(n => n.getAttribute('data-drawer-section') === '事实');
       return !head?.parentElement?.querySelector('[data-interp]')
     })()`))
+  // 不绑具体码：不同来源丢的事件码不同（夹具 no_mention / 微信 no_task_prefix），
+  // 要验的是「有原因码解释」+「明说没留设置快照」+「指明是来源层判定」。
   check('丢弃事件给出原因码解释与「没有设置快照」的声明',
-    eventDrawerText.includes('no_mention') && eventDrawerText.includes('设置快照'))
+    eventDrawerText.includes('原因码') && eventDrawerText.includes('设置快照')
+      && eventDrawerText.includes('来源层'))
 } else {
   console.log('…这个来源没有源头丢弃的事件，跳过事件抽屉断言（夹具跑会覆盖）')
 }

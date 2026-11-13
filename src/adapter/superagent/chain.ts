@@ -2,7 +2,7 @@
  * 把上游的工单 / 派工 / 决定翻译成 domain 的 Chain。
  * 只做形状翻译与时间换算；配色、列、文案都属于 presenter。
  */
-import type { Chain, ChainStateBand, Span } from '../../domain/model.ts'
+import { codeLabel, TICKET_OUTCOME_LABEL, type Chain, type ChainStateBand, type Span } from '../../domain/model.ts'
 import type { RawDecision, RawTicket, StoreLike } from './db.ts'
 import { stageLabel, stageLabelOfTag, stageTag, ticketStage } from './stage.ts'
 import { workerSessionId } from '../../domain/session.ts'
@@ -10,7 +10,8 @@ import { workerSessionId } from '../../domain/session.ts'
 /** 工单是否结束，以及结束时的标签。 */
 export function stateOf(ticket: RawTicket): string {
   if (ticket.ended) {
-    const outcome = ticket.ended.outcome ? ` · ${ticket.ended.outcome}` : ''
+    // 结束去向是上游枚举：译成「中文（code）」，认不得的原样显示。
+    const outcome = ticket.ended.outcome ? ` · ${codeLabel(TICKET_OUTCOME_LABEL, ticket.ended.outcome)}` : ''
     return `已结束${outcome}`
   }
   return '进行中'

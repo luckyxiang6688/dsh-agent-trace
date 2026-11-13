@@ -112,6 +112,9 @@ export const styles: Record<string, Record<string, unknown>> = {
   crashed: { margin: 16, padding: '14px 16px', border: '1px solid #f0cfa0', background: '#fef7ec', borderRadius: 10, color: '#7a4600' },
   crashedTitle: { fontSize: 13.5, fontWeight: 650, marginBottom: 6 },
   crashedHint: { fontSize: 12, color: '#8a6a3a', lineHeight: 1.6 },
+  /** 未配置时的整页说明：没有左栏、没有事件流，只有原因和下一步。 */
+  unconfiguredPane: { height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  unconfiguredCard: { maxWidth: 560, border: '1px solid #e6e8eb', background: '#fff', borderRadius: 10, padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 8 },
 
   // —— 来源页（B14）——
   /** 主区：工单覆盖层与抽屉都相对它定位（inset:0 才是「盖住右侧内容」）。 */
@@ -148,6 +151,9 @@ export const styles: Record<string, Record<string, unknown>> = {
     background: 'transparent', cursor: 'pointer', fontSize: 12,
   },
   eventRowOn: { background: '#f7f9fb' },
+  eventRowHover: { background: '#f5f7fa' },
+  // 「详情」是行内的明示入口：不起眼但不能没有——纯文字行看不出可以点。
+  detailChip: { marginLeft: 6, fontSize: 10.5, color: '#64748b', background: '#f1f5f9', border: 0, borderRadius: 5, padding: '1px 7px', cursor: 'pointer', whiteSpace: 'nowrap' },
   eventTime: { color: '#9aa1ab', fontSize: 11, whiteSpace: 'nowrap' },
   eventFate: { fontSize: 10.5, whiteSpace: 'nowrap' },
   eventText: { color: '#334155', display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, overflow: 'hidden' },

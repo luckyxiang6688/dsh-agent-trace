@@ -205,6 +205,112 @@ export const OUTCOME_LABEL: Readonly<Record<string, string>> = {
 }
 
 /**
+ * 授权强度：上游 `Strength`（`core/model.ts:96`）。
+ * 码是库里的事实，中文是译名；界面统一写成「中文（code）」。
+ */
+export const STRENGTH_LABEL: Readonly<Record<string, string>> = {
+  explicit: '明确',
+  inferred: '推断',
+}
+
+/**
+ * 主控理由码：上游 `core/reasons.ts` 的 `REASONS`。**只翻译上游定义的码**；
+ * 来源可以自定义字面码，表里没有的原样显示，不编含义。
+ */
+export const REASON_LABEL: Readonly<Record<string, string>> = {
+  said: '原话',
+  timeout: '评估超时',
+  policyChanged: '评估期间策略变更',
+  noAdmissible: '没有可准入的事件',
+  startedTicket: '该线程已有工单',
+  acceptedBefore: '该事件此前已接单',
+  routed: '已路由到工单',
+  explicitRouted: '明确点名直路由',
+  humanStop: '人工要求停止',
+  legacyImport: '从旧版任务记录导入',
+  forwarded: '转给该线程已有工单的执行器',
+  senderNotMember: '发送者不在名单内',
+  retried: '人工重试',
+  hostRestarted: 'dsh-superagent 重启',
+  stopUnknown: '停止目标未知或已结束',
+  stopNotExplicit: '停止需要名单内发送者明确要求',
+  directionUnsettled: '实现方向未定',
+  noRuleMatched: '没有命中启用中的规则',
+  ignoredFromCard: '从卡片上忽略，未经规则评估',
+  observed: '观察模式：本应接单',
+  // 准入闸的码（`policy.ts` 直接返回，不在 `REASONS` 表里，但会原样写进决定行）：
+  // 上游自己的界面有同名译名（`client/locales.ts` 的 `reason.*`），这里对齐它。
+  no_mention: '未点名',
+  not_a_member: '发送者不在名单内',
+  admission_ignored: '准入设为忽略',
+  not_human: '自动消息',
+}
+
+/**
+ * 内置规则的 id：上游 `policy.ts` 的 `DEFAULT_RULES`（copy / visual）。
+ * 规则 id 是设置里可自定义的，表里没有的原样显示。
+ */
+export const RULE_LABEL: Readonly<Record<string, string>> = {
+  copy: '文案修正',
+  visual: '视觉修正',
+}
+
+/** 准入依据里的「哪条路」。 */
+export const VIA_LABEL: Readonly<Record<string, string>> = {
+  addressed: '点名且名单内',
+  followup: '该线程已有工单的后续消息',
+  admission: '准入表放行',
+  listed: '名单放行，旧记录',
+  bot: '机器人消息（至多推断）',
+}
+
+/** 准入表命中格。 */
+export const CELL_LABEL: Readonly<Record<string, string>> = {
+  listedUnaddressed: '名单内未点名',
+  unlistedAddressed: '名单外已点名',
+  unlistedUnaddressed: '名单外未点名',
+}
+
+/** 观察模式（AcceptMode）。 */
+export const ACCEPT_MODE_LABEL: Readonly<Record<string, string>> = {
+  off: '关闭',
+  observe: '观察',
+  auto: '自动',
+  would_accept: '观察模式，旧记录',
+}
+
+/** 点名方式：上游 `Trigger.addressed`。 */
+export const ADDRESSED_LABEL: Readonly<Record<string, string>> = {
+  direct: '直接点名',
+  mention: '提及',
+}
+
+/** 工单结束去向：上游 `TicketOutcome`（`core/model.ts:273`）。 */
+export const TICKET_OUTCOME_LABEL: Readonly<Record<string, string>> = {
+  completed: '完成',
+  merged: '已合并',
+  closed: '已关闭',
+  dropped: '已丢弃',
+  stopped: '已停止',
+}
+
+/** 工单由谁结束：上游 `TicketEndBy`（`core/model.ts:271`）。 */
+export const TICKET_END_BY_LABEL: Readonly<Record<string, string>> = {
+  executor: '执行器',
+  human: '人工',
+}
+
+/**
+ * 统一格式：`中文（code）`。表里没有的码原样返回——不认识就不编中文，
+ * 尤其原因码允许来源自定义。
+ */
+export function codeLabel(table: Readonly<Record<string, string>>, code: string | undefined): string | undefined {
+  if (!code) return undefined
+  const label = table[code]
+  return label ? `${label}（${code}）` : code
+}
+
+/**
  * 一段正文：预览 + 总字数 + 稳定 id。
  * `text` 永远不是完整原文（除非本来就短），要看全文走 `readText(id)`。
  */

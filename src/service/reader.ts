@@ -21,7 +21,10 @@ import { gateFacts, KIND_LABEL } from './facts.ts'
 import { thoughtBeforeEval } from './thoughts.ts'
 import type { TextSink } from './prose.ts'
 import { findChildSessions, findRouterSessionId, readSessionHeader } from '../adapter/session/children.ts'
-import { PROSE_PREVIEW_CHARS, type ChainOrigin, type SpanDetail } from '../domain/model.ts'
+import {
+  codeLabel, OUTCOME_LABEL, PROSE_PREVIEW_CHARS, REASON_LABEL, TICKET_END_BY_LABEL, TICKET_OUTCOME_LABEL,
+  type ChainOrigin, type SpanDetail,
+} from '../domain/model.ts'
 import { workerSessionId } from '../domain/session.ts'
 
 export interface ReaderOptions {
@@ -44,8 +47,14 @@ export { workerSessionId }
 
 export function createReader(options: ReaderOptions): ChainReader {
   const store: StoreLike | undefined = openStore(options.stateDir)
-  // 策略快照也走 adapter（P2）：这里不再自己打开 sqlite。
-  const policy: PolicySnapshot | undefined = store ? readPolicy(store) : undefined
+  /**
+   * 策略快照**按需读**，不缓存。
+   *
+   * 设置随时会被保存：启动时读一份的话，之后新存的策略版本在 `at()` 里查不到，
+   * 界面就会把「我们没刷新」说成「库里没有这份快照」——那是假话。
+   * 代价只是每次扫一遍 `kv` 里少量 `settings-version:*` 行，且只在读工单/事件详情时发生。
+   */
+  const policyOf = (): PolicySnapshot | undefined => (store ? readPolicy(store) : undefined)
   const sourceDirectory = (): readonly SourceDirectoryEntry[] => {
     try { return options.sourceDirectory?.() ?? [] } catch { return [] }
   }
@@ -282,7 +291,7 @@ export function createReader(options: ReaderOptions): ChainReader {
             const triggerId = decision.triggerIds?.[0]
             const trigger = triggerId ? store?.triggers().find(item => item.id === triggerId) : undefined
             // 准入依据读 decision.mandate.basis，并按 policyVersion 回查当时的快照
-            return gateFacts(decision, trigger, policy, id, collect, resolveRouterId())
+            return gateFacts(decision, trigger, policyOf(), id, collect, resolveRouterId())
           },
           eventFacts: (id: string, spanId: string, collect?: TextSink) => eventFactsOf(store, id, spanId, collect),
           // 运行方：会话 header 的 agentPreset；读不到就 undefined，抽屉写「未记录」。
@@ -295,9 +304,10 @@ export function createReader(options: ReaderOptions): ChainReader {
               const scope = decision.mandate?.scope?.trim()
               if (scope) return { text: scope, source: 'system' as const }
               // 没有任务陈述时只给判定码，不把整段英文理由当首行。
-              const label = KIND_LABEL[decision.kind] ?? decision.kind
+              const label = codeLabel(KIND_LABEL, decision.kind) ?? decision.kind
               const code = decision.reason?.[0]?.code
-              return { text: code ? `${label} · ${code}` : label, source: 'system' as const }
+              const reason = codeLabel(REASON_LABEL, code)
+              return { text: reason ? `${label} · ${reason}` : label, source: 'system' as const }
             }
             if (spanId.startsWith('assignment-')) {
               const assignmentId = spanId.slice('assignment-'.length)
@@ -412,6 +422,7 @@ export function createReader(options: ReaderOptions): ChainReader {
         const label = labels?.[thread.id]
         return { key, ...(label ? { label } : {}), ...(entry ? { thread: entry } : {}) }
       })
+      const policy = policyOf()
       return buildSourceEventDetail({
         source,
         triggerId,
@@ -420,6 +431,7 @@ export function createReader(options: ReaderOptions): ChainReader {
         decisions: store.decisionsOfTrigger(triggerId),
         threads,
         tickets: store.ticketIndex(),
+        ...(policy ? { policy } : {}),
       })
     },
 
@@ -662,8 +674,8 @@ export function eventFactsOf(
     if (!ended) return undefined
     const facts: EventFact[] = [
       { label: '时间', value: localTime(ended.at), group: 'meta' },
-      { label: '由谁结束', value: ended.by ?? '未记录', group: 'meta' },
-      { label: '去向', value: ended.outcome, group: 'decision', tone: ended.outcome === 'failed' ? 'warn' : 'ok' },
+      { label: '由谁结束', value: codeLabel(TICKET_END_BY_LABEL, ended.by) ?? '未记录', group: 'meta' },
+      { label: '去向', value: codeLabel(TICKET_OUTCOME_LABEL, ended.outcome) ?? ended.outcome, group: 'decision', tone: ended.outcome === 'failed' ? 'warn' : 'ok' },
     ]
     if (ended.reason) facts.push({ label: '原因', group: 'meta', ...free(ended.reason, 'reason') })
     return { title: `工单 Ticket ${ticketId} · 结束`, facts }
@@ -683,7 +695,7 @@ export function eventFactsOf(
     return {
       title: `重试 · 第 ${index + 1} 次派工`,
       facts,
-      note: '上游用一条新派工重试，旧派工的结束原因是 retried；新派工的创建时刻就是重试点。',
+      note: '上游用一条新派工重试，旧派工的结束原因是「人工重试（retried）」；新派工的创建时刻就是重试点。',
     }
   }
 
@@ -692,16 +704,16 @@ export function eventFactsOf(
     const found = store.decisions().find(item => item.id === decisionId[1])
     if (!found) return undefined
     const facts: EventFact[] = [
-      { label: '判定', value: found.kind, group: 'decision', tone: found.kind === 'stop' ? 'warn' : 'muted' },
+      { label: '判定', value: codeLabel(OUTCOME_LABEL, found.kind) ?? found.kind, group: 'decision', tone: found.kind === 'stop' ? 'warn' : 'muted' },
     ]
     for (const reason of found.reason ?? []) {
-      facts.push({ label: '理由码', value: reason.code, group: 'decision', tone: 'muted' })
+      facts.push({ label: '理由码', value: codeLabel(REASON_LABEL, reason.code) ?? reason.code, group: 'decision', tone: 'muted' })
     }
     return {
       title: found.kind === 'stop' ? '停止 · 主控判定' : '不可用 · 主控判定',
       facts,
       note: found.kind === 'stop'
-        ? '这是合法的停止判定；非法的停止请求在上游会被降级成 ignore，不会出现在这里。'
+        ? '这是合法的停止判定；非法的停止请求在上游会被降级成「不接（ignore）」，不会出现在这里。'
         : '不可用是判定结果，不是失败。',
     }
   }

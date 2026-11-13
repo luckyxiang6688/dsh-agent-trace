@@ -10,11 +10,15 @@ import type {
   EventFate, SourceCounts, SourceEvent, SourceEventDetail, SourceEventFact,
   SourceEventInterpretation, SourceEventPage, SourceSummary,
 } from '../domain/source.ts'
-import { OUTCOME_LABEL, PROSE_PREVIEW_CHARS } from '../domain/model.ts'
+import {
+  ACCEPT_MODE_LABEL, ADDRESSED_LABEL, CELL_LABEL, codeLabel, OUTCOME_LABEL, PROSE_PREVIEW_CHARS,
+  REASON_LABEL, RULE_LABEL, STRENGTH_LABEL, VIA_LABEL,
+} from '../domain/model.ts'
 import type {
   RawDecision, RawDisposition, RawSourceAggregate, RawThread, RawTicketIndexEntry, RawTrigger,
 } from '../adapter/superagent/db.ts'
 import { interpretDecisionKind, interpretFilteredCode, interpretReasonCode } from './explain.ts'
+import type { PolicySnapshot } from './policy.ts'
 
 /** 注册表给的来源目录项；测试与拿不到宿主能力时为空。 */
 export interface SourceDirectoryEntry {
@@ -234,6 +238,11 @@ export function buildSourceEventDetail(input: {
   decisions: readonly RawDecision[]
   threads: readonly { key: string; label?: string; thread?: RawThread }[]
   tickets: readonly RawTicketIndexEntry[]
+  /**
+   * 策略快照（`kv` 里的 `settings-version:*`）。给了就能按裁定的 `policyVersion`
+   * 回查「当时名单里是谁、开了哪些规则」；没给或该版本不可得，就在「没记录的事实」里说明。
+   */
+  policy?: PolicySnapshot
 }): SourceEventDetail | undefined {
   const { trigger, disposition } = input
   if (!trigger && !disposition) return undefined
@@ -254,7 +263,7 @@ export function buildSourceEventDetail(input: {
     push('人还是机器', trigger.human === true ? '人' : trigger.human === false ? '自动/机器人' : '未记录')
     push('点名方式', trigger.addressed === undefined || trigger.addressed === null
       ? '没有点名标记（addressed 字段为空）'
-      : trigger.addressed)
+      : codeLabel(ADDRESSED_LABEL, trigger.addressed) ?? trigger.addressed)
     push('线程', trigger.threads?.length
       ? trigger.threads.map(thread => thread.id || `${thread.source}:${thread.id}`).join(' · ')
       : '未记录')
@@ -284,15 +293,54 @@ export function buildSourceEventDetail(input: {
   }
 
   if (decision) {
-    push('裁定', decision.kind ? `${decision.kind}（${OUTCOME_LABEL[decision.kind] ?? decision.kind}）` : '未记录',
+    // 行值统一「中文（英文码）」：码是库里的事实，中文只是译名，两个都留给人对照。
+    push('裁定', decision.kind ? `${codeLabel(OUTCOME_LABEL, decision.kind)}` : '未记录',
       decision.kind === 'ignore' || decision.kind === 'stop' ? 'warn' : 'ok')
     push('决定 id', decision.id)
     push('评估 id', decision.evalId)
-    push('策略版本', decision.policyVersion ?? decision.mandate?.policyVersion)
-    push('授权强度', decision.mandate?.strength ?? decision.strength)
+    // 版本可能是数字（历史坏形状）：原样显示，但只有字符串才能拿去查快照。
+    const rawVersion = decision.policyVersion ?? decision.mandate?.policyVersion
+    const version = typeof rawVersion === 'string' && rawVersion ? rawVersion : undefined
+    push('策略版本', rawVersion === undefined ? undefined : String(rawVersion))
+    // 按版本**精确**回查：取不到就不写这几行，也不拿最新一份顶替——
+    // 用现在的配置解释当时的决定，比不解释更坏。
+    const snapshot = version ? input.policy?.at(version) : undefined
+    if (snapshot) {
+      const savedAt = snapshot.savedAt ? timeText(snapshot.savedAt) : undefined
+      const revision = typeof snapshot.revision === 'number' ? `修订 ${snapshot.revision}` : undefined
+      // 「修订 N」是这份内容**最早**一次保存的修订号；同一内容之后被重复保存不算。
+      push('策略快照', [savedAt, revision ? `${revision}（该内容最早一次保存）` : undefined]
+        .filter(Boolean).join(' · ') || undefined, 'muted')
+      // 形状坏了的行（迁移会把解析失败的原样保留）要说「读不出」，不能说成「名单为空」。
+      const allowed = snapshot.sendersOf(input.source)
+      if (allowed === undefined) {
+        push('当时名单', '该版本的名单字段形状异常，读不出', 'warn')
+      } else {
+        push('当时名单', allowed.length ? allowed.join(' · ') : '名单为空：没有发送者在准入名单内',
+          allowed.length ? 'muted' : 'warn')
+      }
+      const rules = snapshot.enabledRules()
+      if (rules === undefined) {
+        push('当时启用规则', '该版本的规则字段形状异常，读不出', 'warn')
+      } else {
+        const named = rules.filter(Boolean).map(rule => codeLabel(RULE_LABEL, rule) ?? rule)
+        push('当时启用规则', named.length ? named.join(' · ') : '没有启用中的规则', 'muted')
+      }
+      const sender = trigger?.actor?.id ? String(trigger.actor.id) : undefined
+      if (sender) {
+        if (allowed === undefined) {
+          push('名单判定', '名单读不出，无法判断', 'muted')
+        } else {
+          // 与上游同口径（忽略大小写）：这里判的不是「字面相等」，是「上游会不会放行」。
+          const listed = snapshot.allows(input.source, sender)
+          push('名单判定', listed ? '在名单内' : '不在名单内', listed ? 'ok' : 'warn')
+        }
+      }
+    }
+    push('授权强度', codeLabel(STRENGTH_LABEL, decision.mandate?.strength ?? decision.strength))
     push('授权范围', decision.mandate?.scope)
-    push('授权依据', decision.mandate?.basis ? JSON.stringify(decision.mandate.basis) : undefined)
-    push('主控理由码', (decision.reason ?? []).map(reason => reason.code).join(' · '))
+    push('授权依据', decision.mandate?.basis ? basisText(decision.mandate.basis) : undefined)
+    push('主控理由码', (decision.reason ?? []).map(reason => codeLabel(REASON_LABEL, reason.code)).join(' · '))
     // `said` 这类理由把原话放在 `values.text` 里（`service/facts.ts:176-177` 同口径）：
     // 原文照录，不进解释表。
     for (const reason of decision.reason ?? []) {
@@ -309,7 +357,7 @@ export function buildSourceEventDetail(input: {
 
   // —— 解释：只由码翻译，单独成段 ——
   const interpretations: SourceEventInterpretation[] = []
-  if (fate.kind === 'filtered') interpretations.push(interpretFilteredCode(fate.code))
+  if (fate.kind === 'filtered') interpretations.push(interpretFilteredCode(fate.code, input.source))
   if (decision?.kind) interpretations.push(interpretDecisionKind(decision.kind))
   // `said` 的原话已经作为「理由原文」进了事实，不再按码翻译（那会把它当成解释）。
   for (const reason of decision?.reason ?? []) {
@@ -319,8 +367,10 @@ export function buildSourceEventDetail(input: {
   // —— 没记录的事实：逐条声明，不用推测补全 ——
   const notRecorded: string[] = []
   if (fate.kind === 'filtered') {
-    notRecorded.push('过滤只落原因码，没有记录当时的设置快照/策略版本，'
-      + '无法证明是哪条配置丢弃了它。')
+    // 这道闸在**来源层**：上游 intake 调 SourceScope 判定「不听」，把码原样落库（`core/intake.ts:27`），
+    // 根本没进主控准入。写清层级，别让读者拿准入表去对不上号。
+    notRecorded.push('丢弃发生在来源层（来源插件的 scope 判定），没有进入主控准入；'
+      + '这里只记了原因码，没有记录当时来源的配置或设置快照，判据的细节无法从库里复原。')
     notRecorded.push('源头丢弃的事件不写线程记录，线程的 lastAt 不因它更新。')
   }
   if (fate.kind === 'unrecorded') {
@@ -328,6 +378,19 @@ export function buildSourceEventDetail(input: {
   }
   if (fate.kind === 'routed' && !decision) {
     notRecorded.push('这条去向指向一条不存在的决定行，裁定内容无法复原。')
+  }
+  // 裁定的「当时配置」能不能复原，必须在这里说清：拿不到就明说拿不到。
+  if (decision) {
+    const rawVersion = decision.policyVersion ?? decision.mandate?.policyVersion
+    const version = typeof rawVersion === 'string' && rawVersion ? rawVersion : undefined
+    if (version === undefined) {
+      notRecorded.push('这条裁定没有记录可用的策略版本，无法回查当时生效的名单与规则。')
+    } else if (!input.policy?.at(version)) {
+      // 措辞不写「库里没有」：读失败（`readPolicy` 吞异常）与真的没有在这里分不开，
+      // 断言「库里没有」可能是假话。只说我们取不到。
+      notRecorded.push(`取不到策略版本 ${version.slice(0, 8)} 的设置快照（可能已被清理，或本次读取失败），`
+        + '无法复原当时生效的名单与规则。')
+    }
   }
   notRecorded.push('上游在入库前按事件 id 去重（`core/intake.ts:23`：命中已有行就直接返回 duplicate，'
     + '不写任何行、不发 trigger.received）；重复收到的那几次不会留痕，条数是**去重后的事件数**。')
@@ -400,4 +463,41 @@ function previewOf(text: string): string {
 function timeText(value: string): string {
   const ms = Date.parse(value)
   return Number.isFinite(ms) ? new Date(ms).toLocaleString('zh-CN', { hour12: false }) : value
+}
+
+/**
+ * 准入依据（`MandateBasis`）→ 人话。原来整段 `JSON.stringify` 直接给人看，键名和码全是英文。
+ * 这里逐项译成「中文（code）」；`scope` 是来源记录的自由形状，认不得就原样附在最后，不丢事实。
+ */
+function basisText(basis: Record<string, unknown>): string {
+  const parts: string[] = []
+  const text = (value: unknown): string | undefined =>
+    typeof value === 'string' && value.trim() ? value.trim() : undefined
+
+  const via = text(basis['via'])
+  if (via) parts.push(codeLabel(VIA_LABEL, via) ?? via)
+  const addressed = text(basis['addressed'])
+  if (addressed === 'direct') parts.push('直接点名（direct）')
+  else if (addressed === 'mention') parts.push('提及（mention）')
+  const cell = text(basis['cell'])
+  if (cell) parts.push(codeLabel(CELL_LABEL, cell) ?? cell)
+  const sender = text(basis['sender'])
+  if (sender) parts.push(`发送者 ${sender}`)
+  const rules = Array.isArray(basis['rules']) ? basis['rules'] : []
+  const namedRules = rules.flatMap(rule => typeof rule === 'string' && rule ? [codeLabel(RULE_LABEL, rule) ?? rule] : [])
+  if (namedRules.length) parts.push(`命中规则 ${namedRules.join(' · ')}`)
+  const observation = basis['observation']
+  if (observation && typeof observation === 'object') {
+    const mode = text((observation as Record<string, unknown>)['mode'])
+    if (mode) parts.push(codeLabel(ACCEPT_MODE_LABEL, mode) ?? mode)
+  }
+  const authority = text(basis['authority'])
+  if (authority) parts.push(`旧版授权记录 ${authority}`)
+
+  const scope = basis['scope']
+  if (scope && typeof scope === 'object' && Object.keys(scope as Record<string, unknown>).length > 0) {
+    parts.push(`来源范围 ${JSON.stringify(scope)}`)
+  }
+  // 一个字段都认不出时宁可原样给 JSON，也不显示空值。
+  return parts.length ? parts.join(' · ') : JSON.stringify(basis)
 }

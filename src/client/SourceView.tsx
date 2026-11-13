@@ -5,7 +5,7 @@
  * 注意这里的 DOM 命名不用 `data-link` / `data-legend`——那些只属于工单视图，
  * E2E 会全量收集它们来数时序图的连线，来源页混进来会污染断言。
  */
-import { createElement as h } from 'react'
+import { createElement as h, useState } from 'react'
 import type { EventFate, SourceEvent, SourceSummary } from '../domain/source.ts'
 import { FATE_LABEL } from '../service/sources.ts'
 import { styles } from './styles.ts'
@@ -197,25 +197,43 @@ function EventRow(props: {
   const { event } = props
   const fate = event.fate
   const tickets = ticketsOf(fate)
+  // 行本身可点开抽屉，但纯文字行看不出这一点：悬停给底色，正文后常驻一个「详情」标签。
+  const [hover, setHover] = useState(false)
 
   return h('div', {
     'data-event': event.triggerId,
     'data-fate': fate.kind,
     role: 'button',
     tabIndex: 0,
-    title: event.text ?? '(没有正文)',
+    title: `${event.text ?? '(没有正文)'} · 点开看详情`,
     onClick: () => props.onOpen(event.triggerId),
+    onMouseEnter: () => setHover(true),
+    onMouseLeave: () => setHover(false),
+    onFocus: () => setHover(true),
+    onBlur: () => setHover(false),
     onKeyDown: (keyEvent: { key: string; preventDefault(): void }) => {
       if (keyEvent.key !== 'Enter' && keyEvent.key !== ' ') return
       keyEvent.preventDefault()
       props.onOpen(event.triggerId)
     },
-    style: { ...styles.eventRow, borderLeftColor: FATE_COLOR[fate.kind] },
+    style: {
+      ...styles.eventRow, borderLeftColor: FATE_COLOR[fate.kind],
+      ...(hover ? styles.eventRowHover : {}),
+    },
   },
     h('span', { style: styles.eventTime }, formatWhen(event.at)),
     h('span', { style: { ...styles.eventFate, color: fateInk(fate.kind) } }, FATE_LABEL[fate.kind]),
     h('span', { style: styles.eventText },
       h('span', { style: styles.eventLabel }, event.text ?? '(没有正文)'),
+      h('button', {
+        'data-event-detail': 'true',
+        style: styles.detailChip,
+        title: '打开这条事件的详情',
+        onClick: (clickEvent: { stopPropagation(): void }) => {
+          clickEvent.stopPropagation()
+          props.onOpen(event.triggerId)
+        },
+      }, '详情'),
       ...tickets.map(ticketId =>
         h('button', {
           key: ticketId,

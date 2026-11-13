@@ -5,7 +5,10 @@
  * 并按 `decision.policyVersion` 回查当时的策略快照——不再用「当前策略」猜历史。
  * ignore 决策没有 mandate，只显示 strength + reason + 规则的逐条研判。
  */
-import { PROSE_PREVIEW_CHARS, type ProseRef } from '../domain/model.ts'
+import {
+  CELL_LABEL, codeLabel, PROSE_PREVIEW_CHARS, REASON_LABEL, RULE_LABEL, STRENGTH_LABEL, VIA_LABEL,
+  type ProseRef,
+} from '../domain/model.ts'
 import type { RawDecision, RawTrigger } from '../adapter/superagent/db.ts'
 import type { PolicySnapshot } from './policy.ts'
 import type { TextSink } from './prose.ts'
@@ -29,19 +32,12 @@ function freeFact(text: string, id: string, sink?: TextSink): { value: string; p
 /** 评估块的事实行 id：`span/decision-<id>/facts/<key>`，与块的 spanId 对齐。 */
 const factId = (decision: RawDecision, key: string): string => `span/decision-${decision.id}/facts/${key}`
 
-const VIA_LABEL: Readonly<Record<string, string>> = {
-  addressed: '名单内发送者点名',
-  followup: '工单线程内追问',
-  admission: '准入表',
-  listed: '名单内',
-  bot: '机器人',
-}
-
 export const KIND_LABEL: Readonly<Record<string, string>> = {
   accept: '接受，转交派工',
   ignore: '不接',
   stop: '停止工单',
   unavailable: '暂不可用',
+  observed: '只观察，未接单',
 }
 
 export function gateFacts(
@@ -65,7 +61,7 @@ export function gateFacts(
     { group: 'meta', label: '产出', tone: 'muted',
       value: decision.kind === 'accept' && decision.ticketId
         ? `工单 Ticket ${decision.ticketId}`
-        : `没有工单（${decision.kind}）` },
+        : `没有工单：${codeLabel(KIND_LABEL, decision.kind) ?? decision.kind}` },
   )
   const basis = decision.mandate?.basis
   const version = decision.mandate?.policyVersion ?? decision.policyVersion
@@ -82,16 +78,23 @@ export function gateFacts(
 
     rows.push({
       group: 'gate', label: '准入依据',
-      value: `${VIA_LABEL[via] ?? (via || '已落库的授权')}${cell ? ` · 单元格 ${cell}` : ''}`,
+      value: `${codeLabel(VIA_LABEL, via) ?? (via || '已落库的授权')}${cell ? ` · ${codeLabel(CELL_LABEL, cell) ?? cell}` : ''}`,
       tone: 'ok',
     })
 
     if (sender) {
-      const allowed = snapshot?.sendersOf(trigger?.source ?? String(basis['source'] ?? '')) ?? []
+      // 名单成员判定走 `allows`：与上游同口径（忽略大小写），别把放行的人说成不在名单内。
+      // 参与比较的必须是 **actor id**：`basis.sender` 在上游是 `entry.name || entry.id`，
+      // 可能是个显示名，拿显示名去比 id 名单会把人误判成「不在名单内」。
+      const policySource = trigger?.source ?? (typeof basis['source'] === 'string' ? basis['source'] : '')
+      const memberId = trigger?.actor?.id ? String(trigger.actor.id) : sender
+      const listed = snapshot?.sendersOf(policySource) === undefined
+        ? undefined
+        : snapshot.allows(policySource, memberId)
       rows.push({
         group: 'gate', label: '发送者',
-        value: `${sender} · ${snapshot ? (allowed.includes(sender) ? '在名单内' : '不在名单内') : '名单不可得'}`,
-        tone: snapshot ? (allowed.includes(sender) ? 'ok' : 'warn') : 'muted',
+        value: `${sender} · ${listed === undefined ? '名单不可得' : listed ? '在名单内' : '不在名单内'}`,
+        tone: listed === undefined ? 'muted' : listed ? 'ok' : 'warn',
       })
     }
 
@@ -118,12 +121,12 @@ export function gateFacts(
   } else {
     rows.push({
       group: 'gate', label: '准入结果',
-      value: `未接单（${decision.kind}）`,
+      value: `未接单 · ${codeLabel(KIND_LABEL, decision.kind) ?? decision.kind}`,
       tone: 'warn',
     })
     rows.push({
       group: 'gate', label: '强度',
-      value: decision.strength ?? '未记录',
+      value: codeLabel(STRENGTH_LABEL, decision.strength) ?? '未记录',
       tone: 'muted',
     })
     // ignore 没有 mandate：点名信息只能取自 trigger，并注明来源
@@ -143,7 +146,7 @@ export function gateFacts(
     const matched = rules.filter(rule => rule.matched).length
     rows.push({
       group: 'assessment', label: '研判',
-      value: rules.map(rule => `${rule.rule_id} ${rule.matched ? '命中' : '未命中'}`).join(' · '),
+      value: rules.map(rule => `${codeLabel(RULE_LABEL, rule.rule_id) ?? rule.rule_id} ${rule.matched ? '命中' : '未命中'}`).join(' · '),
       tone: matched === rules.length ? 'ok' : matched === 0 ? 'warn' : 'muted',
     })
     const firstReason = rules.find(rule => rule.reason)?.reason
@@ -169,7 +172,7 @@ export function gateFacts(
 
   rows.push({
     group: 'decision', label: '决定',
-    value: `${KIND_LABEL[decision.kind] ?? decision.kind} · ${decision.reason?.[0]?.code ?? '未记录'} · strength=${decision.strength ?? '—'}`,
+    value: `${codeLabel(KIND_LABEL, decision.kind) ?? decision.kind} · ${codeLabel(REASON_LABEL, decision.reason?.[0]?.code) ?? '未记录'} · 强度 ${codeLabel(STRENGTH_LABEL, decision.strength) ?? '—'}`,
     tone: decision.kind === 'accept' ? 'ok' : decision.kind === 'ignore' ? 'warn' : 'muted',
   })
 

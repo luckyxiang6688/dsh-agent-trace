@@ -28,14 +28,31 @@ export interface ResponseLike {
 
 const PREFIX = '/agent-trace'
 
+/**
+ * 插件当前的运行前提。客户端先读它，再决定画正常界面还是空状态。
+ *
+ * 存在的理由：bundle 自动挂载时用户不会去读 README 第 3 步，而 `stateDir`
+ * 解析失败会让整个插件什么也不做。那种情况下**必须有一句话能解释为什么是空的**，
+ * 否则用户看到的就是一个坏掉的页面。
+ */
+export interface RuntimeStatus {
+  readonly configured: boolean
+  /** `stateDir` 从哪来：显式配置、orchestrator 的 machine，或者都没有。 */
+  readonly stateDirOrigin: 'config' | 'orchestrator' | 'none'
+  /** 未配置时给人的下一步；配置成功时不出现。 */
+  readonly hint?: string
+}
+
 /** 注册所有路由。任何异常都转成 500，绝不让宿主进程崩。 */
 export function registerRoutes(
   web: WebServerLike,
-  reader: ChainReader,
+  /** 未配置存储时为 `undefined`：路由仍要注册，否则客户端只能看到一个光秃秃的 404。 */
+  reader: ChainReader | undefined,
   translator: (texts: readonly string[]) => Promise<(string | undefined)[]>,
   // 必填：默认值会静默给出一个「ok 恒为 true、没有存储探测」的实例，
   // 那是最容易误用的缺省——健康接口说自己健康，其实什么都没查。
   health: HealthTracker,
+  status: RuntimeStatus,
 ): void {
   web.register({
     kind: 'prefix',
@@ -49,11 +66,19 @@ export function registerRoutes(
         // 计数按路径模板聚合（不含 id）：既能看出哪条路由在挨打，也不会随流量膨胀。
         label = routeLabel(path)
         if (!sameOrigin(req, url, web.port)) return send(res, 403, { error: 'same-origin request required' })
+        const method = (req.method ?? 'GET').toUpperCase()
+        // `/status` 与 `/health` 在任何状态下都要能答：它们是用户唯一能确认
+        // 「插件到底有没有在工作」的两个入口。
+        if (path === '/status') {
+          if (method !== 'GET') return send(res, 405, { error: 'method not allowed' })
+          return send(res, 200, status)
+        }
         if (path === '/health') {
-          if ((req.method ?? 'GET').toUpperCase() !== 'GET') return send(res, 405, { error: 'method not allowed' })
+          if (method !== 'GET') return send(res, 405, { error: 'method not allowed' })
           return send(res, 200, health.snapshot())
         }
-        const method = (req.method ?? 'GET').toUpperCase()
+        // 未配置存储：其余路由一律回同一个可解释的 503，而不是让客户端各自吃 404。
+        if (!reader) return send(res, 503, { unconfigured: true, ...status })
         if (path.startsWith('/translate')) {
           if (method !== 'POST') return send(res, 405, { error: 'method not allowed' })
           const body = await readJson(req)

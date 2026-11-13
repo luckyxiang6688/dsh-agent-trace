@@ -109,7 +109,7 @@ export function createHealth(now: () => number = Date.now, probe?: StoreProbe): 
  * 计数按模板聚合，否则每个 id 一条，既读不出趋势，也会让快照随流量膨胀。
  */
 export function routeLabel(path: string): string {
-  if (path === '/chains' || path === '/sources' || path === '/health') return path
+  if (path === '/chains' || path === '/sources' || path === '/health' || path === '/status') return path
   if (path === '/translate') return path
   if (path.startsWith('/sources/')) {
     // '/sources/<source>/events' → ['', 'sources', '<source>', 'events']，再往后是 /<id> 与 /text。

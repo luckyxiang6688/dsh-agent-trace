@@ -26,7 +26,7 @@ export default [
     deps: { neverBundle: ['react', 'react/jsx-runtime', 'react-dom'] },
     outputOptions: {
       entryFileNames: 'client.js',
-      banner: 'window.__ModuleLoader__.load({ id: "dsh-agent-trace", factory: (require) => {',
+      banner: 'window.__ModuleLoader__.load({ id: "dsh-superagent-trace", factory: (require) => {',
       footer: 'return module.exports; } });',
       intro: 'var module = { exports: {} }; var exports = module.exports;',
     },
