@@ -14,6 +14,32 @@ const PANEL_ID = 'agent-trace'
 const LABEL = '来源与工单'
 
 /**
+ * 侧栏图标：一个来源点分出两条去向。
+ *
+ * 必须画成 16×16 的 SVG——宿主给图标位固定 16px（`.panelGlyph`），标题起点靠它撑开；
+ * 之前用字符 `⌁` 只有 8.4px 宽，标题会往左错位 7.6px。线宽与相邻几项同一档，
+ * 颜色走 `currentColor`，选中态 / 悬停态由宿主着色。
+ */
+const Glyph = (): ReturnType<typeof createElement> =>
+  createElement('svg', {
+    width: 16,
+    height: 16,
+    viewBox: '0 0 16 16',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.4,
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+    'aria-hidden': 'true',
+  },
+  createElement('circle', { key: 'source', cx: 2.6, cy: 8, r: 1.2, fill: 'currentColor', stroke: 'none' }),
+  createElement('path', { key: 'stem', d: 'M4.3 8h3.2' }),
+  createElement('path', { key: 'fork', d: 'M7.5 8 12 3.7M7.5 8 12 12.3' }),
+  createElement('circle', { key: 'up', cx: 13.2, cy: 3.1, r: 1.2, fill: 'currentColor', stroke: 'none' }),
+  createElement('circle', { key: 'down', cx: 13.2, cy: 12.9, r: 1.2, fill: 'currentColor', stroke: 'none' }),
+  )
+
+/**
  * 面板根部套一层错误边界：上游数据形状意外时，一次渲染抛错会把整块面板卸掉。
  *
  * 兜底文案只拼 `error.message`（截 200 字，与路由 500 响应同口径），不拼栈、不拼对象；
@@ -35,6 +61,6 @@ export function apply(ctx: { slots: SlotsLike }): void {
   ctx.slots.inject('sidebar.panellist', () =>
     ctx.slots.register(
       { name: 'sidebar.panellist', id: PANEL_ID, order: 10, label: () => LABEL },
-      (() => createElement('span', { title: LABEL }, '⌁')) as ComponentType<never>,
+      Glyph as ComponentType<never>,
     ))
 }

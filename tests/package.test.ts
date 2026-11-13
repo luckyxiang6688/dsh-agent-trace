@@ -26,7 +26,7 @@ const EXPECTED = [
 
 test('包名与版本', () => {
   assert.equal(manifest.name, 'dsh-superagent-trace')
-  assert.equal(manifest.version, '0.1.0')
+  assert.equal(manifest.version, '0.1.1')
 })
 
 test('files 逐项钉死，且不包含目录级通配', () => {
